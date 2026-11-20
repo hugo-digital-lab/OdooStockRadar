@@ -252,7 +252,10 @@ XmlRpc "/xmlrpc/2/object" "execute_kw" @($db, $uid, $key, $model, $method, $args
 
 - repo：`hugo-digital-lab/OdooStockRadar`（private，default branch `main`）
 - `version.json`：`{"version":"1.0.0","updated":"...","notes":"..."}` —— 更新檢查的比對來源
-- **發佈新版 SOP**：改 OdooStockRadar.ps1 → 把 `version.json` 的 version 升號 → 兩個檔案推上 repo。完成。
+- **發佈新版 SOP**：改 OdooStockRadar.ps1 → 把 `version.json` 的 version 升號 →
+  複製一份主程式到 `history\OdooStockRadar_vX.Y.Z.ps1`（版本留檔）→ `CHANGELOG.md` 加一節 →
+  推上 repo（ps1＋version.json＋history＋CHANGELOG）。完成。
+- **版本回退**：從 `history\` 取出任何舊版 ps1 覆蓋本機，或推回 main 並把 version.json 降號。
 - 使用者按 ⤓ 檢查更新（純手動，不自動輪詢）→
   抓 version.json → 版本不同 → 詢問 → 下載新版 ps1（驗證長度>5000 且含 StockTrayApp）→
   覆寫自身 → 同步 config.version → `Start-Process wscript start_tray.vbs`（新實例等 Mutex 15 秒）→
