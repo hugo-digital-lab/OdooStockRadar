@@ -2,6 +2,12 @@
 
 所有版本留檔在 `history/`（`OdooStockRadar_vX.Y.Z.ps1`），要回退任何版本直接取用。
 
+## v1.3.1 — 2026-11-21
+
+- **支援含空格的安裝路徑**（如 `F:\OdooStockRadar-main (1)\...`——GitHub 重複下載的 ZIP 常見）：排程改用 ScheduledTasks 模組建立（原生支援空格），HKCU Run 與捷徑皆加引號
+- **科技風圖示**：新增 radar.ico（深藍雷達掃描風格）——桌面捷徑與托盤／視窗圖示統一使用
+- 排程刪除同步改為模組優先（Unregister-ScheduledTask）＋schtasks 備援
+
 ## v1.3.0 — 2026-11-21
 
 - **⏸ 暫停監看（新功能）**：托盤右鍵選單——暫停期間不掃描、復活器也不啟動（解決「只想暫時關閉卻被救回」）
