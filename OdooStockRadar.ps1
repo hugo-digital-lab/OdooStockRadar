@@ -1,4 +1,4 @@
-﻿# Odoo 庫存雷達（獨立版 v1.2.2）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.2.3）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
@@ -1432,6 +1432,9 @@ $uninstallAction = [Action]{
         } catch { }
         $ErrorActionPreference = $prevEap
         Write-Log "UNINSTALL: removed by user from tray menu"
+        [System.Windows.Forms.MessageBox]::Show(
+            "✅ 已解除安裝完成。`n`n・監看已停止，托盤即將關閉`n・排程與開機自動啟動已移除`n・資料夾與歷史資料保留（要徹底清除請手動刪除整個資料夾）`n`n之後要再使用：重新下載 ZIP，執行 setup.bat 即可裝回。",
+            "解除安裝") | Out-Null
         [System.Windows.Forms.Application]::Exit()
     }
     catch {
