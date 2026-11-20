@@ -1,4 +1,4 @@
-﻿# Odoo 庫存雷達（獨立版 v1.1.2）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.1.3）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
@@ -1193,14 +1193,18 @@ function Test-VersionNewer([string]$remote, [string]$local) {
 
 $updateAction = [Action]{
     try {
-        if ([string]::IsNullOrWhiteSpace([string]$Conf.updateCheckUrl)) {
-            [System.Windows.Forms.MessageBox]::Show("尚未設定更新來源。請在 config.json 填入 updateCheckUrl（GitHub version.json 網址）。", "檢查更新") | Out-Null
-            return
+        # 更新來源：config 沒填就用內建預設（公開 repo，免 token）
+        $updateUrl = [string]$Conf.updateCheckUrl
+        if ([string]::IsNullOrWhiteSpace($updateUrl)) {
+            $updateUrl = "https://raw.githubusercontent.com/hugo-digital-lab/OdooStockRadar/main/version.json"
         }
         $wc = New-Object System.Net.WebClient
         $wc.Encoding = [System.Text.Encoding]::UTF8
-        $wc.Headers.Add("Authorization", "Bearer " + $Conf.githubToken)
-        $info = $wc.DownloadString([string]$Conf.updateCheckUrl) | ConvertFrom-Json
+        # 公開 repo 的 raw 下載不需要 token；只有私人 repo 才帶 Authorization
+        if (-not [string]::IsNullOrWhiteSpace([string]$Conf.githubToken)) {
+            $wc.Headers.Add("Authorization", "Bearer " + $Conf.githubToken)
+        }
+        $info = $wc.DownloadString($updateUrl) | ConvertFrom-Json
         $remote = [string]$info.version
         $local = [string]$Conf.version
         if ($remote -eq $local) {
@@ -1220,7 +1224,9 @@ $updateAction = [Action]{
         # 下載新版主程式（raw，跟 version.json 同資料夾）
         $wc2 = New-Object System.Net.WebClient
         $wc2.Encoding = [System.Text.Encoding]::UTF8
-        $wc2.Headers.Add("Authorization", "Bearer " + $Conf.githubToken)
+        if (-not [string]::IsNullOrWhiteSpace([string]$Conf.githubToken)) {
+            $wc2.Headers.Add("Authorization", "Bearer " + $Conf.githubToken)
+        }
         $ps1Url = ([string]$Conf.updateCheckUrl) -replace "version\.json.*$", "OdooStockRadar.ps1"
         $newPs1 = $wc2.DownloadString($ps1Url).TrimStart([char]0xFEFF)
         if ($newPs1.Length -lt 5000 -or -not $newPs1.Contains("StockTrayApp")) {
