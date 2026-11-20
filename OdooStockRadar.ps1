@@ -1,4 +1,4 @@
-﻿# Odoo 庫存雷達（獨立版 v1.3.2）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.4.0）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
@@ -1014,6 +1014,78 @@ public class StockTray : ApplicationContext
         hint.SetBounds(16, y + 4, 540, 20);
         f.Controls.Add(hint);
 
+        // 收集目前欄位值（保留 dataDir/version 等非編輯欄位）
+        Func<Dictionary<string, object>> collect = () =>
+        {
+            var outd = new Dictionary<string, object>(d);
+            outd["url"] = boxes["url"].Text.Trim();
+            outd["db"] = boxes["db"].Text.Trim();
+            outd["user"] = boxes["user"].Text.Trim();
+            outd["key"] = boxes["key"].Text.Trim();
+            var locs2 = new List<object>();
+            foreach (var p in boxes["sellLocations"].Text.Split(new char[] { '、', ',', '，', ';' }, StringSplitOptions.RemoveEmptyEntries))
+                locs2.Add(p.Trim());
+            outd["sellLocations"] = locs2;
+            return outd;
+        };
+
+        var exportBtn = new Button();
+        exportBtn.Text = "📤 匯出";
+        exportBtn.BackColor = Color.FromArgb(51, 65, 85); exportBtn.ForeColor = fg;
+        exportBtn.FlatStyle = FlatStyle.Flat; exportBtn.Font = ft;
+        exportBtn.SetBounds(16, y + 26, 82, 30);
+        exportBtn.Click += new EventHandler((s, e) =>
+        {
+            try
+            {
+                var sd = new SaveFileDialog();
+                sd.Filter = "JSON 設定檔|*.json";
+                sd.FileName = "OdooStockRadar-config.json";
+                if (sd.ShowDialog() == DialogResult.OK)
+                {
+                    System.IO.File.WriteAllText(sd.FileName, ser.Serialize(collect()), new System.Text.UTF8Encoding(false));
+                    MessageBox.Show("已匯出設定（含 API Key，請妥善保管）：\n" + sd.FileName, "匯出設定");
+                }
+            }
+            catch (Exception ex) { MessageBox.Show("匯出失敗：" + ex.Message, "匯出設定"); }
+        });
+        f.Controls.Add(exportBtn);
+
+        var importBtn = new Button();
+        importBtn.Text = "📥 匯入";
+        importBtn.BackColor = Color.FromArgb(51, 65, 85); importBtn.ForeColor = fg;
+        importBtn.FlatStyle = FlatStyle.Flat; importBtn.Font = ft;
+        importBtn.SetBounds(106, y + 26, 82, 30);
+        importBtn.Click += new EventHandler((s, e) =>
+        {
+            try
+            {
+                var od = new OpenFileDialog();
+                od.Filter = "JSON 設定檔|*.json";
+                if (od.ShowDialog() == DialogResult.OK)
+                {
+                    var imp = ser.Deserialize<Dictionary<string, object>>(System.IO.File.ReadAllText(od.FileName));
+                    if (imp == null) { MessageBox.Show("檔案格式不正確（不是有效的設定 JSON）。", "匯入設定"); return; }
+                    string[] ks = new string[] { "url", "db", "user", "key" };
+                    foreach (var kk in ks)
+                        if (imp.ContainsKey(kk) && imp[kk] != null) boxes[kk].Text = imp[kk].ToString();
+                    if (imp.ContainsKey("sellLocations"))
+                    {
+                        var arr = imp["sellLocations"] as System.Collections.IEnumerable;
+                        if (arr != null)
+                        {
+                            var parts = new List<string>();
+                            foreach (var o in arr) parts.Add(o.ToString());
+                            boxes["sellLocations"].Text = string.Join("、", parts.ToArray());
+                        }
+                    }
+                    MessageBox.Show("已載入檔案內容——請檢查無誤後按「儲存」才會生效。", "匯入設定");
+                }
+            }
+            catch (Exception ex) { MessageBox.Show("匯入失敗：" + ex.Message, "匯入設定"); }
+        });
+        f.Controls.Add(importBtn);
+
         var ok = new Button();
         ok.Text = "儲存";
         ok.BackColor = Color.FromArgb(34, 211, 238); ok.ForeColor = Color.FromArgb(15, 23, 42);
@@ -1044,16 +1116,7 @@ public class StockTray : ApplicationContext
 
         f.ShowDialog();
         if (f.DialogResult != DialogResult.OK) return null;
-
-        d["url"] = boxes["url"].Text.Trim();
-        d["db"] = boxes["db"].Text.Trim();
-        d["user"] = boxes["user"].Text.Trim();
-        d["key"] = boxes["key"].Text.Trim();
-        var locs = new List<object>();
-        foreach (var p in boxes["sellLocations"].Text.Split(new char[] { '、', ',', '，', ';' }, StringSplitOptions.RemoveEmptyEntries))
-            locs.Add(p.Trim());
-        d["sellLocations"] = locs;
-        return ser.Serialize(d);
+        return ser.Serialize(collect());
     }
 
     void RenderBullet(string line)
