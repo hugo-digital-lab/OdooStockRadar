@@ -1,4 +1,4 @@
-﻿# Odoo 庫存雷達（獨立版 v1.2.1）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.2.2）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
@@ -1419,6 +1419,9 @@ $uninstallAction = [Action]{
             "要解除安裝嗎？`n`n・停止監看並關閉托盤`n・移除 5 分鐘復活器與 30 分鐘掃描排程`n・移除開機自動啟動`n・資料夾與歷史資料保留（可手動刪除）`n`n之後隨時可以重新執行 setup.bat 裝回來。",
             "解除安裝", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
         if ("$ans" -ne "Yes") { return }
+        # 排程不存在時 schtasks 會寫 stderr；Stop 偏好會把 2>&1 轉成例外——先放寬
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         foreach ($tn in @("OdooStockRadar Tray", "OdooStockRadar Scan", "OdooStockRadar\OdooStockRadar Tray", "OdooStockRadar\OdooStockRadar Scan")) {
             schtasks /Delete /TN $tn /F 2>&1 | Out-Null
         }
@@ -1427,6 +1430,7 @@ $uninstallAction = [Action]{
             $run.DeleteValue("OdooStockRadar")
             $run.Close()
         } catch { }
+        $ErrorActionPreference = $prevEap
         Write-Log "UNINSTALL: removed by user from tray menu"
         [System.Windows.Forms.Application]::Exit()
     }
