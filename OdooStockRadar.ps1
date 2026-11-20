@@ -1049,6 +1049,14 @@ public static class StockTrayApp
         try { acquired = mutex.WaitOne(15000); }
         catch (System.Threading.AbandonedMutexException) { acquired = true; }
         if (!acquired) return;
+        Application.ThreadException += new System.Threading.ThreadExceptionEventHandler((s, e) =>
+        {
+            try { File.AppendAllText(Path.Combine(dataDir, "crash.log"), DateTime.Now + " [UI] " + e.Exception + "\n"); } catch { }
+        });
+        AppDomain.CurrentDomain.UnhandledException += new UnhandledExceptionEventHandler((s, e) =>
+        {
+            try { File.AppendAllText(Path.Combine(dataDir, "crash.log"), DateTime.Now + " [APP] " + e.ExceptionObject + "\n"); } catch { }
+        });
         Application.EnableVisualStyles();
         var tray = new StockTray(dataDir, version, scanNow, checkUpdate);
         tray.ScanRequested += scanNow;
