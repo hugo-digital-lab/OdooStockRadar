@@ -332,6 +332,7 @@ XmlRpc "/xmlrpc/2/object" "execute_kw" @($db, $uid, $key, $model, $method, $args
 
 | 版本 | 日期 | 重點優化 |
 |---|---|---|
+| **v1.2.3** | 2026-11-21 | 解除安裝完成後顯示完成提示框 |
 | **v1.2.2** | 2026-11-20 | 修復解除安裝中斷問題；README 移除內部 Odoo 網址（公開 repo 資安清理） |
 | **v1.2.1** | 2026-11-20 | 設定視窗精簡成 5 格；托盤選單新增「⛔ 解除安裝」（移除排程＋自啟＋關閉）；remove.ps1 修自殺 bug |
 | **v1.2.0** | 2026-11-20 | **⚙ 設定視窗**：圖形化填寫、儲存立即生效免重啟；首次安裝自動彈出引導——告別手改 config.json |
@@ -347,4 +348,4 @@ XmlRpc "/xmlrpc/2/object" "execute_kw" @($db, $uid, $key, $model, $method, $args
 
 ---
 
-*目前版本 v1.2.2 ｜ 文件更新 2026-11-20 ｜ 維護：Hugo + Hermes Agent*
+*目前版本 v1.2.3 ｜ 文件更新 2026-11-20 ｜ 維護：Hugo + Hermes Agent*
