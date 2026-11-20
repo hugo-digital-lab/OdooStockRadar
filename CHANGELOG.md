@@ -2,6 +2,12 @@
 
 所有版本留檔在 `history/`（`OdooStockRadar_vX.Y.Z.ps1`），要回退任何版本直接取用。
 
+## v1.1.3 — 2026-11-20
+
+- **更新來源內建預設**：config 的 updateCheckUrl 留空也能檢查更新（公開 repo 免 token）——舊安裝按 ⤓ 即可升級
+- **免 token 更新**：githubToken 留空時不送 Authorization 標頭（公開 repo 的 raw 下載本就不需要）
+- config.sample.json 清乾淨：內部 Odoo 網址／帳號改為 placeholder（repo 轉公開前的必要清理）；倉位名稱改範例值
+
 ## v1.1.2 — 2026-11-20
 
 - **托盤內建自動掃描**：啟動 1 分鐘後掃第一次（建基準），之後每 30 分鐘——排程被公司電腦封鎖（schtasks 存取被拒）也能正常運作
