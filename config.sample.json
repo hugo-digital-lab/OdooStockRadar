@@ -4,8 +4,11 @@
   "user": "帳號@gmail.com",
   "key": "PUT-YOUR-ODOO-API-KEY-HERE",
   "prefix": "21",
-  "sellLocations": ["倉位名稱A", "倉位名稱B"],
-  "dataDir": "D:\OdooStockRadar\data",
+  "sellLocations": [
+    "倉位名稱A",
+    "倉位名稱B"
+  ],
+  "dataDir": "",
   "version": "1.0.0",
   "updateCheckUrl": "https://raw.githubusercontent.com/hugo-digital-lab/OdooStockRadar/main/version.json",
   "githubToken": ""
