@@ -3,7 +3,6 @@
 # NOTE: install to a path WITHOUT spaces (scheduled task quoting limitation)
 $ErrorActionPreference = 'Stop'
 $dir = $PSScriptRoot
-if ($dir -match ' ') { Write-Host "[!] Install path contains spaces - please use a path like D:\OdooStockRadar"; exit 1 }
 
 # 第一次安裝：用程式碼直接組 config（不讀 sample 檔，避免任何格式問題）
 # dataDir 自動指向本機資料夾（每台機器路徑不同也不會錯）
@@ -27,9 +26,15 @@ if (-not (Test-Path (Join-Path $dir 'config.json'))) {
 }
 if (-not (Test-Path (Join-Path $dir 'data'))) { New-Item -ItemType Directory -Path (Join-Path $dir 'data') | Out-Null }
 
-# 建排程：先試標準名稱；被擋（存取被拒）再試自己的子資料夾；再被擋就誠實回報。
-# 即使排程全部失敗，托盤 1.1.2 起內建自動掃描（啟動 1 分鐘後掃第一次，之後每 30 分鐘），功能不受影響。
+# 建排程：首選 ScheduledTasks 模組（原生支援含空格路徑）；失敗再退回 schtasks 兩種任務名。
+# 即使排程全部失敗，托盤內建自動掃描（啟動 1 分鐘後掃第一次，之後每 30 分鐘），功能不受影響。
 function New-Task([string]$name, [int]$minutes, [string]$vbs) {
+    try {
+        $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + (Join-Path $dir $vbs) + '"')
+        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes $minutes) -RepetitionDuration (New-TimeSpan -Days 3650)
+        Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Force -ErrorAction Stop | Out-Null
+        return $true
+    } catch { }
     try {
         schtasks /Create /F /TN "$name" /TR "wscript.exe $dir\$vbs" /SC MINUTE /MO $minutes 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) { return $true }
@@ -47,7 +52,7 @@ $okScan = New-Task "OdooStockRadar Scan" 30 "start_scan.vbs"
 
 try {
     $run = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\Microsoft\Windows\CurrentVersion\Run", $true)
-    $run.SetValue("OdooStockRadar", "wscript.exe $dir\start_tray.vbs")
+    $run.SetValue("OdooStockRadar", ('wscript.exe "' + (Join-Path $dir 'start_tray.vbs') + '"'))
     $run.Close()
     $okRun = $true
 } catch { $okRun = $false }
@@ -61,6 +66,7 @@ try {
     $sc.Arguments = ('"' + (Join-Path $dir 'resume_tray.vbs') + '"')
     $sc.WorkingDirectory = $dir
     $sc.Description = 'Odoo 庫存雷達（啟動/恢復監看）'
+    $sc.IconLocation = Join-Path $dir 'radar.ico' + ',0'
     $sc.Save()
     Write-Host "[OK] Desktop shortcut '庫存雷達' created."
 } catch { Write-Host "[!] Desktop shortcut creation failed (not fatal)." }
