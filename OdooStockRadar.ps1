@@ -1,4 +1,4 @@
-﻿# Odoo 庫存雷達（獨立版 v1.2.0）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.2.1）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
@@ -305,13 +305,15 @@ public class StockTray : ApplicationContext
     static extern IntPtr SendMessage(IntPtr h, int m, IntPtr w, IntPtr l);
 
     public Action settingsFn;
+    public Action uninstallFn;
 
-    public StockTray(string dataDir, string ver, Action scanNow, Action checkUpdate, Action openSettings)
+    public StockTray(string dataDir, string ver, Action scanNow, Action checkUpdate, Action openSettings, Action uninstall)
     {
         baseDir = dataDir;
         version = ver;
         updateCheckFn = checkUpdate;
         settingsFn = openSettings;
+        uninstallFn = uninstall;
         sync = new Control();
         var h0 = sync.Handle;
 
@@ -326,7 +328,13 @@ public class StockTray : ApplicationContext
         menu.Items.Add("⚙ 設定", null, new EventHandler((s, e) => { if (openSettings != null) openSettings(); }));
         menu.Items.Add("🔍 檢查更新", null, new EventHandler((s, e) => checkUpdate()));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("結束常駐", null, new EventHandler((s, e) => { icon.Visible = false; Application.Exit(); }));
+        menu.Items.Add("⛔ 解除安裝", null, new EventHandler((s, e) => { if (uninstallFn != null) uninstallFn(); }));
+        menu.Items.Add("結束常駐", null, new EventHandler((s, e) =>
+        {
+            var r = MessageBox.Show("結束後，5 分鐘復活排程會自動把程式救回來。\n要永久停止請改用「⛔ 解除安裝」。\n\n確定現在結束？", "結束常駐",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (r == DialogResult.Yes) { icon.Visible = false; Application.Exit(); }
+        }));
         icon.ContextMenuStrip = menu;
         icon.DoubleClick += new EventHandler((s, e) => ShowWin());
         icon.BalloonTipClicked += new EventHandler((s, e) => ShowWin());
@@ -953,7 +961,7 @@ public class StockTray : ApplicationContext
         var f = new Form();
         f.Text = "⚙ Odoo 庫存雷達 — 設定";
         f.BackColor = bg;
-        f.Size = new Size(600, 442);
+        f.Size = new Size(600, 310);
         f.FormBorderStyle = FormBorderStyle.FixedDialog;
         f.MaximizeBox = false; f.MinimizeBox = false;
         f.StartPosition = FormStartPosition.CenterScreen;
@@ -961,10 +969,9 @@ public class StockTray : ApplicationContext
 
         Font fl = new Font("Consolas", 9f);
         Font ft = new Font("Consolas", 9.5f);
-        string[] labels = new string[] {
-            "Odoo 網址", "資料庫", "帳號", "API Key",
-            "料號字首", "倉位（、分隔）", "更新來源（留空＝自動）", "GitHub Token（公開 repo 免填）" };
-        string[] keys = new string[] { "url", "db", "user", "key", "prefix", "sellLocations", "updateCheckUrl", "githubToken" };
+        // 料號字首／更新來源／GitHub Token 為固定值，不開放編輯（config 原值保留）
+        string[] labels = new string[] { "Odoo 網址", "資料庫", "帳號", "API Key", "倉位（、分隔）" };
+        string[] keys = new string[] { "url", "db", "user", "key", "sellLocations" };
         var boxes = new Dictionary<string, TextBox>();
         int y = 16;
         for (int i = 0; i < labels.Length; i++)
@@ -994,7 +1001,7 @@ public class StockTray : ApplicationContext
         }
 
         var hint = new Label();
-        hint.Text = "填好按「儲存」立即生效，不需要重新啟動程式。";
+        hint.Text = "倉位名稱需與 Odoo 庫位一致。填好按「儲存」立即生效，不需重啟。";
         hint.ForeColor = lbl; hint.Font = fl;
         hint.SetBounds(16, y + 4, 380, 20);
         f.Controls.Add(hint);
@@ -1034,13 +1041,10 @@ public class StockTray : ApplicationContext
         d["db"] = boxes["db"].Text.Trim();
         d["user"] = boxes["user"].Text.Trim();
         d["key"] = boxes["key"].Text.Trim();
-        d["prefix"] = boxes["prefix"].Text.Trim();
         var locs = new List<object>();
         foreach (var p in boxes["sellLocations"].Text.Split(new char[] { '、', ',', '，', ';' }, StringSplitOptions.RemoveEmptyEntries))
             locs.Add(p.Trim());
         d["sellLocations"] = locs;
-        d["updateCheckUrl"] = boxes["updateCheckUrl"].Text.Trim();
-        d["githubToken"] = boxes["githubToken"].Text.Trim();
         return ser.Serialize(d);
     }
 
@@ -1259,7 +1263,7 @@ public class ToastPopup : Form
 
 public static class StockTrayApp
 {
-    public static void Run(string dataDir, string version, Action scanNow, Action checkUpdate, Action openSettings, bool needsSetup)
+    public static void Run(string dataDir, string version, Action scanNow, Action checkUpdate, Action openSettings, Action uninstallFn, bool needsSetup)
     {
         // Mutex(false) + WaitOne(15s)：更新重啟時，新實例會等舊的釋放後接手；
         // 5 分鐘復活器在托盤還活著時觸發 → 等 15 秒逾時後自行退出
@@ -1277,7 +1281,7 @@ public static class StockTrayApp
             try { File.AppendAllText(Path.Combine(dataDir, "crash.log"), DateTime.Now + " [APP] " + e.ExceptionObject + "\n"); } catch { }
         });
         Application.EnableVisualStyles();
-        var tray = new StockTray(dataDir, version, scanNow, checkUpdate, openSettings);
+        var tray = new StockTray(dataDir, version, scanNow, checkUpdate, openSettings, uninstallFn);
         tray.ScanRequested += scanNow;
         // 第一次安裝（key 還是 placeholder）→ 1.5 秒後自動彈出設定視窗
         if (needsSetup)
@@ -1408,5 +1412,28 @@ $settingsAction = [Action]{
     }
 }
 
+$uninstallAction = [Action]{
+    # 解除安裝：刪排程＋自啟 → 關閉托盤（資料保留）
+    try {
+        $ans = [System.Windows.Forms.MessageBox]::Show(
+            "要解除安裝嗎？`n`n・停止監看並關閉托盤`n・移除 5 分鐘復活器與 30 分鐘掃描排程`n・移除開機自動啟動`n・資料夾與歷史資料保留（可手動刪除）`n`n之後隨時可以重新執行 setup.bat 裝回來。",
+            "解除安裝", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ("$ans" -ne "Yes") { return }
+        foreach ($tn in @("OdooStockRadar Tray", "OdooStockRadar Scan", "OdooStockRadar\OdooStockRadar Tray", "OdooStockRadar\OdooStockRadar Scan")) {
+            schtasks /Delete /TN $tn /F 2>&1 | Out-Null
+        }
+        try {
+            $run = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\Microsoft\Windows\CurrentVersion\Run", $true)
+            $run.DeleteValue("OdooStockRadar")
+            $run.Close()
+        } catch { }
+        Write-Log "UNINSTALL: removed by user from tray menu"
+        [System.Windows.Forms.Application]::Exit()
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("解除安裝失敗：" + $_.Exception.Message, "解除安裝") | Out-Null
+    }
+}
+
 $needsSetup = ([string]::IsNullOrWhiteSpace([string]$Conf.key) -or ([string]$Conf.key -match 'PUT-YOUR|在這裡貼上'))
-[StockTrayApp]::Run([string]$Conf.dataDir, [string]$Conf.version, $scanAction, $updateAction, $settingsAction, $needsSetup)
+[StockTrayApp]::Run([string]$Conf.dataDir, [string]$Conf.version, $scanAction, $updateAction, $settingsAction, $uninstallAction, $needsSetup)
