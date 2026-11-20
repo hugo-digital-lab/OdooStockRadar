@@ -1,4 +1,4 @@
-﻿# Odoo 庫存雷達（獨立版 v1.0.0）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.1.1）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
@@ -1215,7 +1215,8 @@ $updateAction = [Action]{
             throw "下載內容異常（長度 $($newPs1.Length)）"
         }
         $self = Join-Path $ScriptDir "OdooStockRadar.ps1"
-        [System.IO.File]::WriteAllText($self, $newPs1, (New-Object System.Text.UTF8Encoding($false)))
+        # 關鍵：必須帶 BOM 寫回（PS 5.1 讀無 BOM+中文腳本會用 ANSI 解析 → 啟動即失敗）
+        [System.IO.File]::WriteAllText($self, $newPs1, (New-Object System.Text.UTF8Encoding($true)))
 
         # 同步 config 的 version 欄位
         $cfgPath = Join-Path $ScriptDir "config.json"
@@ -1224,7 +1225,12 @@ $updateAction = [Action]{
         [System.IO.File]::WriteAllText($cfgPath, ($cfgObj | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
         $Conf.version = $remote
 
-        # 重啟：先啟動新托盤（會等舊的釋放 Mutex），再結束自己
+        # 完成提示（下載很快，以完成框代替進度條），按確定後才重啟
+        [System.Windows.Forms.MessageBox]::Show(
+            "✅ 已更新到 $remote。\n按下確定後程式會自動重新啟動。".Replace("\n", [Environment]::NewLine),
+            "檢查更新") | Out-Null
+
+        # 重啟：啟動新托盤（會等舊的釋放 Mutex），再結束自己
         Start-Process wscript.exe -ArgumentList ('"' + (Join-Path $ScriptDir 'start_tray.vbs') + '"')
         [System.Windows.Forms.Application]::Exit()
     }
