@@ -16,6 +16,8 @@
 - 設定欄位：Odoo 網址／資料庫／帳號／API Key／料號字首／倉位（、分隔）／更新來源（留空＝自動）／GitHub Token（公開 repo 免填）
 - 儲存時自動驗證：網址格式、Key 不得為 placeholder
 
+- **setup.ps1 體驗翻新（同日）**：第一次安裝不再中途退出——直接完成安裝並啟動托盤，設定視窗自動彈出；`dataDir` 自動抓安裝路徑（不再寫死 D:\OdooStockRadar\data，每台機器放哪都對）
+
 ## v1.1.3 — 2026-11-20
 
 - **更新來源內建預設**：config 的 updateCheckUrl 留空也能檢查更新（公開 repo 免 token）——舊安裝按 ⤓ 即可升級
