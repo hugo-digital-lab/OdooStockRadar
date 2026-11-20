@@ -1,15 +1,12 @@
 {
-  "url": "http://114.32.3.230:88",
-  "db": "em",
-  "user": "HungPlayPlay@gmail.com",
+  "url": "http://ODOO-IP:PORT",
+  "db": "你的資料庫名",
+  "user": "帳號@gmail.com",
   "key": "PUT-YOUR-ODOO-API-KEY-HERE",
   "prefix": "21",
-  "sellLocations": [
-    "享物總倉",
-    "禾洛智能雲倉"
-  ],
-  "dataDir": "D:\\OdooStockRadar\\data",
+  "sellLocations": ["倉位名稱A", "倉位名稱B"],
+  "dataDir": "D:\OdooStockRadar\data",
   "version": "1.0.0",
-  "updateCheckUrl": "",
+  "updateCheckUrl": "https://raw.githubusercontent.com/hugo-digital-lab/OdooStockRadar/main/version.json",
   "githubToken": ""
 }
