@@ -52,6 +52,22 @@ try {
     $okRun = $true
 } catch { $okRun = $false }
 
+# 桌面捷徑（啟動/恢復監看）
+try {
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    $ws = New-Object -ComObject WScript.Shell
+    $sc = $ws.CreateShortcut((Join-Path $desktop '庫存雷達.lnk'))
+    $sc.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+    $sc.Arguments = ('"' + (Join-Path $dir 'resume_tray.vbs') + '"')
+    $sc.WorkingDirectory = $dir
+    $sc.Description = 'Odoo 庫存雷達（啟動/恢復監看）'
+    $sc.Save()
+    Write-Host "[OK] Desktop shortcut '庫存雷達' created."
+} catch { Write-Host "[!] Desktop shortcut creation failed (not fatal)." }
+
+# 重新安裝時清除舊的暫停旗標，確保啟動
+Remove-Item (Join-Path (Join-Path $dir 'data') '.paused') -Force -ErrorAction SilentlyContinue
+
 # 立刻啟動托盤（不用等排程或下次登入）；第一次安裝時托盤會自動彈出設定視窗
 try { Start-Process wscript.exe -ArgumentList ('"' + (Join-Path $dir 'start_tray.vbs') + '"') } catch { }
 
