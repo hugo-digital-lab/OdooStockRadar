@@ -222,13 +222,13 @@ function Invoke-StockScan {
             $nm = $ch.oname -replace ("^\[" + $ch.code + "\]\s*"), ""
             $arrow = if ($ch.d -gt 0) { "▲" } else { "▼" }
             if ($ch.hasOld -and $ch.hasNew) {
-                $locPart = "$($SellLocs[0]) $(FmtQty $ch.oa)→$(FmtQty $ch.na)、$($SellLocs[1]) $(FmtQty $ch.ob)→$(FmtQty $ch.nb)"
+                $locPart = "$($SellLocs[0]) $(FmtQty $ch.oa)→剩餘$(FmtQty $ch.na)、$($SellLocs[1]) $(FmtQty $ch.ob)→剩餘$(FmtQty $ch.nb)"
             }
             elseif ($ch.hasNew) {
-                $locPart = "新出現：$($SellLocs[0]) $(FmtQty $ch.na)、$($SellLocs[1]) $(FmtQty $ch.nb)"
+                $locPart = "新出現：$($SellLocs[0]) 剩餘$(FmtQty $ch.na)、$($SellLocs[1]) 剩餘$(FmtQty $ch.nb)"
             }
             else { $locPart = "兩倉已歸零" }
-            $lines.Add("• $($ch.code) $nm｜$locPart｜合計 $(FmtQty $ch.ot)→$(FmtQty $ch.nt)（$arrow$(FmtQty ([math]::Abs($ch.d)))）")
+            $lines.Add("• $($ch.code) $nm｜$locPart｜合計 $(FmtQty $ch.ot)→剩餘$(FmtQty $ch.nt)（$arrow$(FmtQty ([math]::Abs($ch.d)))）")
             $i++
         }
         if ($changed.Count -gt $maxLines) { $lines.Add("…另有 $($changed.Count - $maxLines) 筆變動較小未列出，完整清單：reports/") }
@@ -246,6 +246,18 @@ function Invoke-StockScan {
         [System.IO.File]::WriteAllText($SnapshotPath, $snapJson, (New-Object System.Text.UTF8Encoding($false)))
         $reps = @(Get-ChildItem $ReportsDir -Filter "changes_*.txt" | Sort-Object Name)
         if ($reps.Count -gt 200) { $reps | Select-Object -First ($reps.Count - 200) | ForEach-Object { Remove-Item $_.FullName -ErrorAction SilentlyContinue } }
+        # 報告只保留 3 天；watch.log 超過 400 行時修剪到最後 300 行
+        try {
+            $cutoff = (Get-Date).AddDays(-3)
+            Get-ChildItem $ReportsDir -Filter "changes_*.txt" |
+                Where-Object { $_.LastWriteTime -lt $cutoff } |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+            if ((Test-Path $LogPath) -and ((Get-Item $LogPath).Length -gt 60KB)) {
+                $lines = [System.IO.File]::ReadAllLines($LogPath)
+                [System.IO.File]::WriteAllLines($LogPath, $lines[($lines.Count - 300)..($lines.Count - 1)])
+            }
+        }
+        catch { }
         Write-Log ("OK: {0} changed, {1} moved ({2} codes) @ {3}" -f $changed.Count, $moved.Count, $new.Count, $ts)
     }
     catch {
@@ -593,6 +605,13 @@ public class StockTray : ApplicationContext
         return 0;
     }
 
+    static double ToDbl(string s)
+    {
+        double v = 0;
+        double.TryParse(s, out v);
+        return v;
+    }
+
     static string Fmt(double v)
     {
         double r = Math.Round(v, 2);
@@ -727,13 +746,13 @@ public class StockTray : ApplicationContext
                 foreach (var line in all)
                 {
                     string l = line.TrimEnd();
-                    if (l.StartsWith("•")) { RenderBullet(l); }
+                    if (l.StartsWith("•")) { RenderBullet(l); Append("\n", Color.FromArgb(15, 23, 42), 4f, false); }
                     else if (l.StartsWith("ℹ") || l.StartsWith("…"))
                     {
                         Append("      " + l + "\n", Color.FromArgb(100, 116, 139), 9f, false);
                     }
                 }
-                Append("\n", Color.FromArgb(15, 23, 42), 2f, false);
+                Append("\n", Color.FromArgb(15, 23, 42), 9f, false);
             }
             if (!any) Append("  （還沒有任何變動紀錄）\n", Color.FromArgb(100, 116, 139), 9f, false);
         }
@@ -771,6 +790,7 @@ public class StockTray : ApplicationContext
 
             var b1 = NewBtn("⟳ 立即檢查", Color.FromArgb(34, 211, 238));
             b1.Click += new EventHandler((s, e) => { ScanNow(); });
+            scanBtn = b1;
             b1.Margin = new Padding(8, 8, 3, 0);
             panel.Controls.Add(b1);
             var b2 = NewBtn("↻ 重新整理", Color.FromArgb(148, 163, 184));
@@ -853,14 +873,59 @@ public class StockTray : ApplicationContext
         catch { }
     }
 
-    void ScanNow() { if (ScanRequested != null) ScanRequested(); }
+    Button scanBtn;
+    int scanPollGrace;
+    System.Windows.Forms.Timer scanPoll;
+
+    void ScanNow()
+    {
+        if (ScanRequested != null) ScanRequested();
+        // 狀態顯示：按鈕換文字為「⏳ 檢查中…」（不停用——停用態在深色下會變黑塊；
+        // 重複點擊無害，掃描互斥鎖會讓多餘的掃描程序自行退出），用互斥鎖輪詢何時結束
+        try
+        {
+            if (scanBtn != null) { scanBtn.Text = "⏳ 檢查中…"; }
+            if (scanPoll == null)
+            {
+                scanPoll = new System.Windows.Forms.Timer();
+                scanPoll.Interval = 800;
+                scanPoll.Tick += new EventHandler((s, e) =>
+                {
+                    if (scanPollGrace > 0) { scanPollGrace--; return; }
+                    bool busy = true;
+                    try
+                    {
+                        using (var m = new System.Threading.Mutex(false, "OdooStockRadarScanMutex"))
+                        {
+                            bool owned = false;
+                            try { owned = m.WaitOne(0); }
+                            catch (System.Threading.AbandonedMutexException) { owned = true; }
+                            busy = !owned;
+                            if (owned) { try { m.ReleaseMutex(); } catch { } }
+                        }
+                    }
+                    catch { }
+                    if (!busy)
+                    {
+                        scanPoll.Stop();
+                        if (scanBtn != null) { scanBtn.Text = "⟳ 立即檢查"; }
+                    }
+                });
+            }
+            scanPollGrace = 2;
+            scanPoll.Stop();
+            scanPoll.Start();
+        }
+        catch { }
+    }
     public event Action ScanRequested;
 
     void RenderBullet(string line)
     {
-        // 卡片解析：• 代碼 品名｜庫位明細｜合計（▲/▼n） → 兩行結構
+        // 卡片解析：• 代碼 品名｜庫位明細｜合計（▲/▼n） → 三行結構，逐項依增減上色
         Color light = Color.FromArgb(226, 232, 240);
-        Color mid = Color.FromArgb(148, 163, 184);
+        Color mid = Color.FromArgb(100, 116, 139);
+        Color label = Color.FromArgb(148, 163, 184);
         Color cyan = Color.FromArgb(34, 211, 238);
         Color green = Color.FromArgb(74, 222, 128);
         Color red = Color.FromArgb(248, 113, 113);
@@ -874,23 +939,53 @@ public class StockTray : ApplicationContext
         string code = head.Substring(0, sp);
         string name = head.Substring(sp + 1).Trim();
 
-        string loc = parts[1].Replace("享物總倉", "享物").Replace("禾洛智能雲倉", "禾洛").Replace("、", "  ・  ");
-        string total = parts[2];
-        bool up = total.Contains('▲');
-        Color ac = up ? green : red;
+        // 合計方向
+        var tm = Regex.Match(parts[2], @"(\d+(?:\.\d+)?)→(?:剩餘)?(\d+(?:\.\d+)?)");
+        double ot = tm.Success ? ToDbl(tm.Groups[1].Value) : 0;
+        double nt = tm.Success ? ToDbl(tm.Groups[2].Value) : 0;
+        bool up = nt > ot; bool down = nt < ot;
+        Color ac = up ? green : (down ? red : mid);
 
-        string baseT = total;
-        string delta = "";
-        int paren = total.IndexOf('（');
-        if (paren >= 0) { baseT = total.Substring(0, paren); delta = total.Substring(paren); }
+        // 第一行：▲/▼ + 料號 + 品名（全名）—— 用段落縮排，不靠空格
+        box.SelectionIndent = 26;
+        Append(up ? "▲ " : (down ? "▼ " : "＝ "), ac, 10f, true);
+        Append(code + "  ", cyan, 10f, true);
+        Append(name + "\n", light, 9f, false);
 
-        Append("      ", light, 10f, false);
-        Append(up ? "▲ " : "▼ ", ac, 11f, true);
-        Append(code + "  ", cyan, 11f, true);
-        Append(name + "\n", light, 10f, false);
-        Append("         " + loc + "\n", mid, 9.5f, false);
-        Append("         " + baseT, light, 9.5f, false);
-        Append(delta + "\n", ac, 9.5f, true);
+        // 第二行：庫位對（相容 a→b 與 a→剩餘b 兩種格式），逐對上色
+        box.SelectionIndent = 26;
+        var pairs = Regex.Matches(parts[1], @"([^、：]+?)\s*(\d+(?:\.\d+)?)→(?:剩餘)?(\d+(?:\.\d+)?)");
+        if (pairs.Count == 0)
+        {
+            Append(parts[1].Trim() + "\n", mid, 9f, false);
+        }
+        else
+        {
+            bool first = true;
+            foreach (System.Text.RegularExpressions.Match m in pairs)
+            {
+                string lbl = m.Groups[1].Value.Trim()
+                    .Replace("享物總倉", "享物").Replace("禾洛智能雲倉", "禾洛")
+                    .Replace("新出現：", "");
+                double a = ToDbl(m.Groups[2].Value);
+                double b = ToDbl(m.Groups[3].Value);
+                Color pc = b > a ? green : (b < a ? red : mid);
+                if (!first) Append(" ・ ", mid, 9f, false);
+                Append(lbl + " ", label, 8.5f, false);
+                Append(Fmt(a) + "→剩餘" + Fmt(b), pc, 9f, b != a);
+                first = false;
+            }
+            Append("\n", light, 9f, false);
+        }
+
+        // 第三行：合計（依方向上色）
+        box.SelectionIndent = 26;
+        Append("合計 ", label, 8.5f, false);
+        Append(Fmt(ot) + "→剩餘" + Fmt(nt), ac, 9.5f, true);
+        if (nt != ot)
+            Append("（" + (up ? "▲" : "▼") + Fmt(Math.Abs(nt - ot)) + "）", ac, 9f, true);
+        Append("\n", light, 9f, false);
+        box.SelectionIndent = 0;
     }
 }
 
@@ -1068,6 +1163,22 @@ public static class StockTrayApp
 
 Add-Type -TypeDefinition $src -ReferencedAssemblies System.Windows.Forms,System.Drawing,System.Core,System.Web.Extensions
 
+function Test-VersionNewer([string]$remote, [string]$local) {
+    # 逐段數字比較：1.1.0 > 1.0.9；無法解析時退回字串不等判斷
+    try {
+        $r = $remote.Split('.'); $l = $local.Split('.')
+        for ($i = 0; $i -lt [Math]::Max($r.Count, $l.Count); $i++) {
+            $rv = 0; $lv = 0
+            if ($i -lt $r.Count) { [void][int]::TryParse($r[$i], [ref]$rv) }
+            if ($i -lt $l.Count) { [void][int]::TryParse($l[$i], [ref]$lv) }
+            if ($rv -gt $lv) { return $true }
+            if ($rv -lt $lv) { return $false }
+        }
+        return $false
+    }
+    catch { return $remote -ne $local }
+}
+
 $updateAction = [Action]{
     try {
         if ([string]::IsNullOrWhiteSpace([string]$Conf.updateCheckUrl)) {
@@ -1082,6 +1193,10 @@ $updateAction = [Action]{
         $local = [string]$Conf.version
         if ($remote -eq $local) {
             [System.Windows.Forms.MessageBox]::Show("已是最新版本 $local。", "檢查更新") | Out-Null
+            return
+        }
+        if (-not (Test-VersionNewer $remote $local)) {
+            [System.Windows.Forms.MessageBox]::Show("遠端版本 $remote 不比目前 $local 新。", "檢查更新") | Out-Null
             return
         }
         $ans = [System.Windows.Forms.MessageBox]::Show(
