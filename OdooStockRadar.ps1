@@ -1,4 +1,4 @@
-﻿# Odoo 庫存雷達（獨立版 v1.1.1）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.1.2）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
@@ -354,6 +354,18 @@ public class StockTray : ApplicationContext
         refresh.Interval = 60000;
         refresh.Tick += new EventHandler((s, e) => { if (win != null && win.Visible) FillContent(false); });
         refresh.Start();
+
+        // 內建自動掃描：啟動 1 分鐘後掃第一次（建基準），之後每 30 分鐘一次。
+        // 即使排程工作被公司電腦封鎖（schtasks 存取被拒），掃描仍會照常運作。
+        var autoScan = new System.Windows.Forms.Timer();
+        int autoTick = 0;
+        autoScan.Interval = 60000;
+        autoScan.Tick += new EventHandler((s, e) =>
+        {
+            autoTick++;
+            if (autoTick == 1) { ScanNow(); autoScan.Interval = 30 * 60 * 1000; }
+        });
+        autoScan.Start();
     }
 
     void NotifySoon()
