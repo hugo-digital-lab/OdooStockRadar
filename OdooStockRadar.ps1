@@ -1,9 +1,10 @@
-﻿# Odoo 庫存雷達（獨立版 v1.2.3）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.3.0）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
+#   恢復監看（桌面捷徑用）    : powershell -File OdooStockRadar.ps1 -Resume
 # 設定檔：同資料夾 config.json（遺失時會自動產生範本後結束）
-param([switch]$Scan)
+param([switch]$Scan, [switch]$Resume)
 
 $ErrorActionPreference = 'Stop'
 
@@ -29,6 +30,9 @@ if (-not (Test-Path $ReportsDir)) { New-Item -ItemType Directory -Path $ReportsD
 $SnapshotPath = Join-Path $Conf.dataDir "snapshot.json"
 $LogPath = Join-Path $Conf.dataDir "watch.log"
 $SellLocs = @($Conf.sellLocations)
+
+# 暫停旗標：暫停期間，復活器與排程掃描都直接退出；只有桌面捷徑（-Resume）會清旗標啟動
+if (-not $Resume -and (Test-Path (Join-Path $Conf.dataDir '.paused'))) { exit 0 }
 
 function Write-Log([string]$msg) {
     try { Add-Content -Path $LogPath -Value ("{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg) -Encoding UTF8 } catch { }
@@ -306,14 +310,16 @@ public class StockTray : ApplicationContext
 
     public Action settingsFn;
     public Action uninstallFn;
+    public Action pauseFn;
 
-    public StockTray(string dataDir, string ver, Action scanNow, Action checkUpdate, Action openSettings, Action uninstall)
+    public StockTray(string dataDir, string ver, Action scanNow, Action checkUpdate, Action openSettings, Action uninstall, Action pause)
     {
         baseDir = dataDir;
         version = ver;
         updateCheckFn = checkUpdate;
         settingsFn = openSettings;
         uninstallFn = uninstall;
+        pauseFn = pause;
         sync = new Control();
         var h0 = sync.Handle;
 
@@ -328,6 +334,7 @@ public class StockTray : ApplicationContext
         menu.Items.Add("⚙ 設定", null, new EventHandler((s, e) => { if (openSettings != null) openSettings(); }));
         menu.Items.Add("🔍 檢查更新", null, new EventHandler((s, e) => checkUpdate()));
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("⏸ 暫停監看", null, new EventHandler((s, e) => { if (pauseFn != null) pauseFn(); }));
         menu.Items.Add("⛔ 解除安裝", null, new EventHandler((s, e) => { if (uninstallFn != null) uninstallFn(); }));
         menu.Items.Add("結束常駐", null, new EventHandler((s, e) =>
         {
@@ -1001,9 +1008,9 @@ public class StockTray : ApplicationContext
         }
 
         var hint = new Label();
-        hint.Text = "倉位名稱需與 Odoo 庫位一致。填好按「儲存」立即生效，不需重啟。";
+        hint.Text = "倉位名稱需與 Odoo 庫位一致；儲存後立即生效，免重啟。";
         hint.ForeColor = lbl; hint.Font = fl;
-        hint.SetBounds(16, y + 4, 380, 20);
+        hint.SetBounds(16, y + 4, 540, 20);
         f.Controls.Add(hint);
 
         var ok = new Button();
@@ -1263,7 +1270,7 @@ public class ToastPopup : Form
 
 public static class StockTrayApp
 {
-    public static void Run(string dataDir, string version, Action scanNow, Action checkUpdate, Action openSettings, Action uninstallFn, bool needsSetup)
+    public static void Run(string dataDir, string version, Action scanNow, Action checkUpdate, Action openSettings, Action uninstallFn, Action pauseFn, bool needsSetup)
     {
         // Mutex(false) + WaitOne(15s)：更新重啟時，新實例會等舊的釋放後接手；
         // 5 分鐘復活器在托盤還活著時觸發 → 等 15 秒逾時後自行退出
@@ -1281,7 +1288,7 @@ public static class StockTrayApp
             try { File.AppendAllText(Path.Combine(dataDir, "crash.log"), DateTime.Now + " [APP] " + e.ExceptionObject + "\n"); } catch { }
         });
         Application.EnableVisualStyles();
-        var tray = new StockTray(dataDir, version, scanNow, checkUpdate, openSettings, uninstallFn);
+        var tray = new StockTray(dataDir, version, scanNow, checkUpdate, openSettings, uninstallFn, pauseFn);
         tray.ScanRequested += scanNow;
         // 第一次安裝（key 還是 placeholder）→ 1.5 秒後自動彈出設定視窗
         if (needsSetup)
@@ -1430,6 +1437,11 @@ $uninstallAction = [Action]{
             $run.DeleteValue("OdooStockRadar")
             $run.Close()
         } catch { }
+        # 桌面捷徑與暫停旗標一併清掉（重裝時乾淨啟動）
+        try {
+            Remove-Item (Join-Path ([Environment]::GetFolderPath('Desktop')) '庫存雷達.lnk') -Force -ErrorAction SilentlyContinue
+            Remove-Item (Join-Path ([string]$Conf.dataDir) '.paused') -Force -ErrorAction SilentlyContinue
+        } catch { }
         $ErrorActionPreference = $prevEap
         Write-Log "UNINSTALL: removed by user from tray menu"
         [System.Windows.Forms.MessageBox]::Show(
@@ -1442,5 +1454,19 @@ $uninstallAction = [Action]{
     }
 }
 
+$pauseAction = [Action]{
+    # 暫停監看：寫旗標 → 關閉托盤；復活器與排程會因旗標休息，桌面捷徑可恢復
+    try {
+        [System.IO.File]::WriteAllText((Join-Path ([string]$Conf.dataDir) '.paused'), (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), (New-Object System.Text.UTF8Encoding($false)))
+        Write-Log "PAUSED: monitor paused by user from tray menu"
+        [System.Windows.Forms.MessageBox]::Show(
+            "⏸ 已暫停監看，托盤即將關閉。`n`n暫停期間：不會自動掃描、復活器也不會啟動。`n恢復方式：點兩下桌面「庫存雷達」捷徑即可恢復。", "暫停監看") | Out-Null
+        [System.Windows.Forms.Application]::Exit()
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("暫停失敗：" + $_.Exception.Message, "暫停監看") | Out-Null
+    }
+}
+
 $needsSetup = ([string]::IsNullOrWhiteSpace([string]$Conf.key) -or ([string]$Conf.key -match 'PUT-YOUR|在這裡貼上'))
-[StockTrayApp]::Run([string]$Conf.dataDir, [string]$Conf.version, $scanAction, $updateAction, $settingsAction, $uninstallAction, $needsSetup)
+[StockTrayApp]::Run([string]$Conf.dataDir, [string]$Conf.version, $scanAction, $updateAction, $settingsAction, $uninstallAction, $pauseAction, $needsSetup)
