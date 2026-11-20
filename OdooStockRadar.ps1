@@ -1,4 +1,4 @@
-﻿# Odoo 庫存雷達（獨立版 v1.1.3）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.2.0）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
@@ -304,11 +304,14 @@ public class StockTray : ApplicationContext
     [DllImport("user32.dll")]
     static extern IntPtr SendMessage(IntPtr h, int m, IntPtr w, IntPtr l);
 
-    public StockTray(string dataDir, string ver, Action scanNow, Action checkUpdate)
+    public Action settingsFn;
+
+    public StockTray(string dataDir, string ver, Action scanNow, Action checkUpdate, Action openSettings)
     {
         baseDir = dataDir;
         version = ver;
         updateCheckFn = checkUpdate;
+        settingsFn = openSettings;
         sync = new Control();
         var h0 = sync.Handle;
 
@@ -320,6 +323,7 @@ public class StockTray : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add("看庫存變動紀錄", null, new EventHandler((s, e) => ShowWin()));
         menu.Items.Add("立即檢查一次", null, new EventHandler((s, e) => { scanNow(); NotifySoon(); }));
+        menu.Items.Add("⚙ 設定", null, new EventHandler((s, e) => { if (openSettings != null) openSettings(); }));
         menu.Items.Add("🔍 檢查更新", null, new EventHandler((s, e) => checkUpdate()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("結束常駐", null, new EventHandler((s, e) => { icon.Visible = false; Application.Exit(); }));
@@ -809,6 +813,10 @@ public class StockTray : ApplicationContext
             b2.Click += new EventHandler((s, e) => FillContent(true));
             b2.Margin = new Padding(3, 8, 3, 0);
             panel.Controls.Add(b2);
+            var bSet = NewBtn("⚙ 設定", Color.FromArgb(148, 163, 184));
+            bSet.Click += new EventHandler((s, e) => { if (settingsFn != null) settingsFn(); });
+            bSet.Margin = new Padding(3, 8, 3, 0);
+            panel.Controls.Add(bSet);
 
             var lbl = new Label();
             lbl.Text = "🔍";
@@ -931,6 +939,110 @@ public class StockTray : ApplicationContext
         catch { }
     }
     public event Action ScanRequested;
+
+    // ===== 設定視窗：讀入現有 config JSON → 欄位編輯 → 回傳新 JSON（null=取消） =====
+    public static string ShowSettingsDialog(string json)
+    {
+        var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+        var d = ser.Deserialize<Dictionary<string, object>>(json);
+        Color bg = Color.FromArgb(15, 23, 42);
+        Color field = Color.FromArgb(30, 41, 59);
+        Color fg = Color.FromArgb(226, 232, 240);
+        Color lbl = Color.FromArgb(148, 163, 184);
+
+        var f = new Form();
+        f.Text = "⚙ Odoo 庫存雷達 — 設定";
+        f.BackColor = bg;
+        f.Size = new Size(600, 442);
+        f.FormBorderStyle = FormBorderStyle.FixedDialog;
+        f.MaximizeBox = false; f.MinimizeBox = false;
+        f.StartPosition = FormStartPosition.CenterScreen;
+        f.TopMost = true;
+
+        Font fl = new Font("Consolas", 9f);
+        Font ft = new Font("Consolas", 9.5f);
+        string[] labels = new string[] {
+            "Odoo 網址", "資料庫", "帳號", "API Key",
+            "料號字首", "倉位（、分隔）", "更新來源（留空＝自動）", "GitHub Token（公開 repo 免填）" };
+        string[] keys = new string[] { "url", "db", "user", "key", "prefix", "sellLocations", "updateCheckUrl", "githubToken" };
+        var boxes = new Dictionary<string, TextBox>();
+        int y = 16;
+        for (int i = 0; i < labels.Length; i++)
+        {
+            var l = new Label();
+            l.Text = labels[i];
+            l.ForeColor = lbl; l.Font = fl;
+            l.SetBounds(16, y + 3, 150, 20);
+            f.Controls.Add(l);
+            var tb = new TextBox();
+            tb.BackColor = field; tb.ForeColor = fg; tb.BorderStyle = BorderStyle.FixedSingle;
+            string val = "";
+            if (d.ContainsKey(keys[i]) && d[keys[i]] != null)
+            {
+                if (keys[i] == "sellLocations")
+                {
+                    var arr = d[keys[i]] as System.Collections.IEnumerable;
+                    if (arr != null) { var parts = new List<string>(); foreach (var o in arr) parts.Add(o.ToString()); val = string.Join("、", parts.ToArray()); }
+                }
+                else val = d[keys[i]].ToString();
+            }
+            tb.Text = val;
+            tb.SetBounds(170, y, 400, 24);
+            f.Controls.Add(tb);
+            boxes[keys[i]] = tb;
+            y += 36;
+        }
+
+        var hint = new Label();
+        hint.Text = "填好按「儲存」立即生效，不需要重新啟動程式。";
+        hint.ForeColor = lbl; hint.Font = fl;
+        hint.SetBounds(16, y + 4, 380, 20);
+        f.Controls.Add(hint);
+
+        var ok = new Button();
+        ok.Text = "儲存";
+        ok.BackColor = Color.FromArgb(34, 211, 238); ok.ForeColor = Color.FromArgb(15, 23, 42);
+        ok.FlatStyle = FlatStyle.Flat; ok.Font = new Font("Consolas", 9.5f, FontStyle.Bold);
+        ok.SetBounds(392, y + 26, 82, 30);
+        ok.Click += new EventHandler((s, e) =>
+        {
+            if (!boxes["url"].Text.Trim().StartsWith("http"))
+            {
+                MessageBox.Show("Odoo 網址要以 http:// 或 https:// 開頭。", "設定"); return;
+            }
+            string k = boxes["key"].Text.Trim();
+            if (k.Length == 0 || k.Contains("PUT-YOUR") || k.Contains("在這裡貼上"))
+            {
+                MessageBox.Show("請填入 API Key（Odoo → 設定 → 使用者 → API 金鑰 產生）。", "設定"); return;
+            }
+            f.DialogResult = DialogResult.OK;
+        });
+        f.Controls.Add(ok);
+
+        var cancel = new Button();
+        cancel.Text = "取消";
+        cancel.BackColor = Color.FromArgb(51, 65, 85); cancel.ForeColor = fg;
+        cancel.FlatStyle = FlatStyle.Flat; cancel.Font = ft;
+        cancel.SetBounds(486, y + 26, 82, 30);
+        cancel.Click += new EventHandler((s, e) => { f.DialogResult = DialogResult.Cancel; });
+        f.Controls.Add(cancel);
+
+        f.ShowDialog();
+        if (f.DialogResult != DialogResult.OK) return null;
+
+        d["url"] = boxes["url"].Text.Trim();
+        d["db"] = boxes["db"].Text.Trim();
+        d["user"] = boxes["user"].Text.Trim();
+        d["key"] = boxes["key"].Text.Trim();
+        d["prefix"] = boxes["prefix"].Text.Trim();
+        var locs = new List<object>();
+        foreach (var p in boxes["sellLocations"].Text.Split(new char[] { '、', ',', '，', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            locs.Add(p.Trim());
+        d["sellLocations"] = locs;
+        d["updateCheckUrl"] = boxes["updateCheckUrl"].Text.Trim();
+        d["githubToken"] = boxes["githubToken"].Text.Trim();
+        return ser.Serialize(d);
+    }
 
     void RenderBullet(string line)
     {
@@ -1147,7 +1259,7 @@ public class ToastPopup : Form
 
 public static class StockTrayApp
 {
-    public static void Run(string dataDir, string version, Action scanNow, Action checkUpdate)
+    public static void Run(string dataDir, string version, Action scanNow, Action checkUpdate, Action openSettings, bool needsSetup)
     {
         // Mutex(false) + WaitOne(15s)：更新重啟時，新實例會等舊的釋放後接手；
         // 5 分鐘復活器在托盤還活著時觸發 → 等 15 秒逾時後自行退出
@@ -1165,8 +1277,16 @@ public static class StockTrayApp
             try { File.AppendAllText(Path.Combine(dataDir, "crash.log"), DateTime.Now + " [APP] " + e.ExceptionObject + "\n"); } catch { }
         });
         Application.EnableVisualStyles();
-        var tray = new StockTray(dataDir, version, scanNow, checkUpdate);
+        var tray = new StockTray(dataDir, version, scanNow, checkUpdate, openSettings);
         tray.ScanRequested += scanNow;
+        // 第一次安裝（key 還是 placeholder）→ 1.5 秒後自動彈出設定視窗
+        if (needsSetup)
+        {
+            var stTimer = new System.Windows.Forms.Timer();
+            stTimer.Interval = 1500;
+            stTimer.Tick += new EventHandler((s, e) => { stTimer.Stop(); if (tray.settingsFn != null) tray.settingsFn(); });
+            stTimer.Start();
+        }
         Application.Run(tray);
         mutex.ReleaseMutex();
     }
@@ -1261,4 +1381,32 @@ $scanAction = [Action]{
     # 背景程序掃描：UI 不卡（等 report 檔出來，watcher 會自動刷新＋跳通知）
     Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (Join-Path $ScriptDir 'OdooStockRadar.ps1'), '-Scan' -WindowStyle Hidden
 }
-[StockTrayApp]::Run([string]$Conf.dataDir, [string]$Conf.version, $scanAction, $updateAction)
+
+$settingsAction = [Action]{
+    # 設定視窗：程式自己組 JSON → 寫檔 → 原地套用（免重啟）
+    try {
+        $current = $Conf | ConvertTo-Json -Depth 6
+        $result = [StockTray]::ShowSettingsDialog($current)
+        if ($result) {
+            $new = $result | ConvertFrom-Json
+            [System.IO.File]::WriteAllText($ConfigPath, $result, (New-Object System.Text.UTF8Encoding($false)))
+            $Conf.url = [string]$new.url
+            $Conf.db = [string]$new.db
+            $Conf.user = [string]$new.user
+            $Conf.key = [string]$new.key
+            $Conf.prefix = [string]$new.prefix
+            $Conf.sellLocations = @($new.sellLocations)
+            $Conf.updateCheckUrl = [string]$new.updateCheckUrl
+            $Conf.githubToken = [string]$new.githubToken
+            $script:SellLocs = @($new.sellLocations)
+            Write-Log "SETTINGS: config updated via settings dialog"
+        }
+    }
+    catch {
+        Write-Log ("SETTINGS ERROR: " + $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show("設定儲存失敗：" + $_.Exception.Message, "設定") | Out-Null
+    }
+}
+
+$needsSetup = ([string]::IsNullOrWhiteSpace([string]$Conf.key) -or ([string]$Conf.key -match 'PUT-YOUR|在這裡貼上'))
+[StockTrayApp]::Run([string]$Conf.dataDir, [string]$Conf.version, $scanAction, $updateAction, $settingsAction, $needsSetup)
