@@ -1042,14 +1042,18 @@ public static class StockTrayApp
 {
     public static void Run(string dataDir, string version, Action scanNow, Action checkUpdate)
     {
-        bool createdNew;
-        var mutex = new System.Threading.Mutex(true, "OdooStockRadarMutex", out createdNew);
-        if (!createdNew) return;
+        // Mutex(false) + WaitOne(15s)：更新重啟時，新實例會等舊的釋放後接手；
+        // 5 分鐘復活器在托盤還活著時觸發 → 等 15 秒逾時後自行退出
+        var mutex = new System.Threading.Mutex(false, "OdooStockRadarMutex");
+        bool acquired = false;
+        try { acquired = mutex.WaitOne(15000); }
+        catch (System.Threading.AbandonedMutexException) { acquired = true; }
+        if (!acquired) return;
         Application.EnableVisualStyles();
         var tray = new StockTray(dataDir, version, scanNow, checkUpdate);
         tray.ScanRequested += scanNow;
         Application.Run(tray);
-        GC.KeepAlive(mutex);
+        mutex.ReleaseMutex();
     }
 }
 '@
@@ -1057,26 +1061,52 @@ public static class StockTrayApp
 Add-Type -TypeDefinition $src -ReferencedAssemblies System.Windows.Forms,System.Drawing,System.Core,System.Web.Extensions
 
 $updateAction = [Action]{
-    if ([string]::IsNullOrWhiteSpace([string]$Conf.updateCheckUrl)) {
-        [System.Windows.Forms.MessageBox]::Show("尚未設定更新來源。請在 config.json 填入 updateCheckUrl（GitHub version.json 網址）。", "檢查更新") | Out-Null
+    try {
+        if ([string]::IsNullOrWhiteSpace([string]$Conf.updateCheckUrl)) {
+            [System.Windows.Forms.MessageBox]::Show("尚未設定更新來源。請在 config.json 填入 updateCheckUrl（GitHub version.json 網址）。", "檢查更新") | Out-Null
+            return
+        }
+        $wc = New-Object System.Net.WebClient
+        $wc.Encoding = [System.Text.Encoding]::UTF8
+        $wc.Headers.Add("Authorization", "Bearer " + $Conf.githubToken)
+        $info = $wc.DownloadString([string]$Conf.updateCheckUrl) | ConvertFrom-Json
+        $remote = [string]$info.version
+        $local = [string]$Conf.version
+        if ($remote -eq $local) {
+            [System.Windows.Forms.MessageBox]::Show("已是最新版本 $local。", "檢查更新") | Out-Null
+            return
+        }
+        $ans = [System.Windows.Forms.MessageBox]::Show(
+            "有新版本 $remote（目前 $local）。要現在下載並自動更新嗎？",
+            "檢查更新", [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ("$ans" -ne "Yes") { return }
+
+        # 下載新版主程式（raw，跟 version.json 同資料夾）
+        $wc2 = New-Object System.Net.WebClient
+        $wc2.Encoding = [System.Text.Encoding]::UTF8
+        $wc2.Headers.Add("Authorization", "Bearer " + $Conf.githubToken)
+        $ps1Url = ([string]$Conf.updateCheckUrl) -replace "version\.json.*$", "OdooStockRadar.ps1"
+        $newPs1 = $wc2.DownloadString($ps1Url).TrimStart([char]0xFEFF)
+        if ($newPs1.Length -lt 5000 -or -not $newPs1.Contains("StockTrayApp")) {
+            throw "下載內容異常（長度 $($newPs1.Length)）"
+        }
+        $self = Join-Path $ScriptDir "OdooStockRadar.ps1"
+        [System.IO.File]::WriteAllText($self, $newPs1, (New-Object System.Text.UTF8Encoding($false)))
+
+        # 同步 config 的 version 欄位
+        $cfgPath = Join-Path $ScriptDir "config.json"
+        $cfgObj = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $cfgObj.version = $remote
+        [System.IO.File]::WriteAllText($cfgPath, ($cfgObj | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+        $Conf.version = $remote
+
+        # 重啟：先啟動新托盤（會等舊的釋放 Mutex），再結束自己
+        Start-Process wscript.exe -ArgumentList ('"' + (Join-Path $ScriptDir 'start_tray.vbs') + '"')
+        [System.Windows.Forms.Application]::Exit()
     }
-    else {
-        try {
-            $wc = New-Object System.Net.WebClient
-            $wc.Encoding = [System.Text.Encoding]::UTF8
-            $wc.Headers.Add("Authorization", "Bearer " + $Conf.githubToken)
-            $info = $wc.DownloadString([string]$Conf.updateCheckUrl) | ConvertFrom-Json
-            $remote = [string]$info.version
-            if ($remote -ne [string]$Conf.version) {
-                [System.Windows.Forms.MessageBox]::Show("有新版本 $remote（目前 $($Conf.version)）。請下載最新版 OdooStockRadar.ps1 覆蓋本檔，然後托盤右鍵→結束常駐→重新啟動。", "檢查更新") | Out-Null
-            }
-            else {
-                [System.Windows.Forms.MessageBox]::Show("已是最新版本 $($Conf.version)。", "檢查更新") | Out-Null
-            }
-        }
-        catch {
-            [System.Windows.Forms.MessageBox]::Show("檢查更新失敗：" + $_.Exception.Message, "檢查更新") | Out-Null
-        }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("檢查更新失敗：" + $_.Exception.Message, "檢查更新") | Out-Null
     }
 }
 
