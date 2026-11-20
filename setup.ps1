@@ -5,10 +5,15 @@ $ErrorActionPreference = 'Stop'
 $dir = $PSScriptRoot
 
 # 第一次安裝：用程式碼直接組 config（不讀 sample 檔，避免任何格式問題）
-# dataDir 自動指向本機資料夾（每台機器路徑不同也不會錯）
+# dataDir 自動指向本機資料夾；版號直接讀主程式檔頭（裝的程式是幾版就標幾版）
 $firstRun = $false
 if (-not (Test-Path (Join-Path $dir 'config.json'))) {
     $firstRun = $true
+    $cfgVer = "1.0.0"
+    try {
+        $m = Select-String -Path (Join-Path $dir 'OdooStockRadar.ps1') -Pattern '獨立版 v([0-9\.]+)' | Select-Object -First 1
+        if ($m) { $cfgVer = $m.Matches[0].Groups[1].Value }
+    } catch { }
     $cfg = [ordered]@{
         url = "http://ODOO-IP:PORT"
         db = "你的資料庫名"
@@ -17,12 +22,12 @@ if (-not (Test-Path (Join-Path $dir 'config.json'))) {
         prefix = "21"
         sellLocations = @("倉位名稱A", "倉位名稱B")
         dataDir = (Join-Path $dir 'data')
-        version = "1.0.0"
+        version = $cfgVer
         updateCheckUrl = "https://raw.githubusercontent.com/hugo-digital-lab/OdooStockRadar/main/version.json"
         githubToken = ""
     }
     [System.IO.File]::WriteAllText((Join-Path $dir 'config.json'), ($cfg | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
-    Write-Host "[i] config.json created - dataDir auto-set to this folder."
+    Write-Host "[i] config.json created - dataDir auto-set, version = $cfgVer"
 }
 if (-not (Test-Path (Join-Path $dir 'data'))) { New-Item -ItemType Directory -Path (Join-Path $dir 'data') | Out-Null }
 
