@@ -1,4 +1,4 @@
-﻿# Odoo 庫存雷達（獨立版 v1.4.0）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
+﻿# Odoo 庫存雷達（獨立版 v1.4.1）——托盤常駐 + 排程掃描 + 搜尋 + 更新檢查，單檔程式
 # 用法：
 #   一般啟動（托盤常駐）      : powershell -File OdooStockRadar.ps1
 #   排程掃描一次（無 UI）     : powershell -File OdooStockRadar.ps1 -Scan
@@ -397,7 +397,14 @@ public class StockTray : ApplicationContext
 
     Icon MakeIcon()
     {
-        // 訊號條圖示（使用者偏好此經典樣式，v1.3.2 改回）
+        // 優先載入安裝資料夾裡的 radar.ico（訊號條設計）——真 .ico 檔讓工作列圖示穩定
+        // （用程式即時畫的 Icon.FromHandle 在 Windows 11 工作列可能被主控台圖示取代）
+        try
+        {
+            string icoPath = Path.GetFullPath(Path.Combine(baseDir, "..", "radar.ico"));
+            if (File.Exists(icoPath)) return new Icon(icoPath);
+        }
+        catch { }
         var bmp = new Bitmap(32, 32);
         using (var g = Graphics.FromImage(bmp))
         {
