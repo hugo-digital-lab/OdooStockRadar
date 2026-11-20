@@ -14,5 +14,9 @@ try {
     $run.DeleteValue("OdooStockRadar")
     $run.Close()
 } catch { }
+try {
+    Remove-Item (Join-Path ([Environment]::GetFolderPath('Desktop')) '庫存雷達.lnk') -Force
+    Remove-Item (Join-Path $PSScriptRoot 'data\.paused') -Force
+} catch { }
 Write-Host "[OK] Removed: tray stopped, scheduled tasks + autostart deleted."
 Write-Host "Data folder (data\) kept - delete the whole folder manually if you want."
