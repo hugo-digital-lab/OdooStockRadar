@@ -4,10 +4,16 @@
 $ErrorActionPreference = 'Stop'
 $dir = $PSScriptRoot
 if ($dir -match ' ') { Write-Host "[!] Install path contains spaces - please use a path like D:\OdooStockRadar"; exit 1 }
+
+# 第一次安裝：從 sample 建 config，dataDir 自動指向本機資料夾（每台機器路徑不同也不會錯）
+$firstRun = $false
 if (-not (Test-Path (Join-Path $dir 'config.json'))) {
-    Copy-Item (Join-Path $dir 'config.sample.json') (Join-Path $dir 'config.json')
-    Write-Host "[!] config.json created from sample. Edit it (Odoo URL / db / user / key), then re-run setup.ps1."
-    exit 1
+    $firstRun = $true
+    $sample = Get-Content (Join-Path $dir 'config.sample.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $sample.dataDir = (Join-Path $dir 'data')
+    $sample | ConvertTo-Json -Depth 6 | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $dir 'config.json'), ($sample | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "[i] config.json created - dataDir auto-set to this folder."
 }
 if (-not (Test-Path (Join-Path $dir 'data'))) { New-Item -ItemType Directory -Path (Join-Path $dir 'data') | Out-Null }
 
@@ -36,14 +42,15 @@ try {
     $okRun = $true
 } catch { $okRun = $false }
 
-# 立刻啟動托盤（不用等排程或下次登入）
+# 立刻啟動托盤（不用等排程或下次登入）；第一次安裝時托盤會自動彈出設定視窗
 try { Start-Process wscript.exe -ArgumentList ('"' + (Join-Path $dir 'start_tray.vbs') + '"') } catch { }
 
 Write-Host ""
 if ($okRun) { Write-Host "[OK] Startup registered (HKCU Run)." } else { Write-Host "[!] HKCU Run registration failed - start the tray manually with start_tray.vbs." }
 if ($okTray -and $okScan) { Write-Host "[OK] Scheduled tasks created (reviver 5 min + scan 30 min)." }
 else { Write-Host "[OK] Program is ready. (Scheduled tasks were blocked by this PC - the tray has a built-in 30-min auto scan instead.)" }
-Write-Host " The tray icon appears within a few seconds. Double-click it to open the radar."
+if ($firstRun) { Write-Host "[i] First run: the settings window will pop up in a few seconds - fill in Odoo URL / db / user / API key and press Save." }
+else { Write-Host " The tray icon appears within a few seconds. Double-click it to open the radar." }
 Write-Host ""
 Write-Host "Press any key to close..."
 $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
